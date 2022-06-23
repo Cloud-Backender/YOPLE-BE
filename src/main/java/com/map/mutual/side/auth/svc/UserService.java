@@ -1,6 +1,8 @@
 package com.map.mutual.side.auth.svc;
 
-import com.map.mutual.side.auth.model.dto.*;
+import com.map.mutual.side.auth.model.dto.UserInWorld;
+import com.map.mutual.side.auth.model.dto.UserInfoDto;
+import com.map.mutual.side.auth.model.dto.WorldInviteAccept;
 import com.map.mutual.side.auth.model.dto.block.UserBlockDto;
 import com.map.mutual.side.auth.model.dto.block.UserBlockedDto;
 import com.map.mutual.side.auth.model.dto.notification.NotiDto;
@@ -9,7 +11,9 @@ import com.map.mutual.side.auth.model.dto.report.UserReportDto;
 import com.map.mutual.side.common.exception.YOPLEServiceException;
 import com.map.mutual.side.world.model.dto.WorldDto;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 /**
  * fileName       : UserService
@@ -26,11 +30,32 @@ public interface UserService {
     List<UserInWorld> worldUsers(long worldId, String suid) throws Exception;
 
     //2. 월드에 참여하기.
-    WorldDto JoinWorld( String worldinvitationCode) throws YOPLEServiceException;
+    WorldDto JoinWorld( String worldinvitationCode) throws YOPLEServiceException, ExecutionException, InterruptedException;
     UserInfoDto userDetails(String suid) throws YOPLEServiceException;
     UserInfoDto userInfoUpdate(String suid, String userId, String profileUrl, String profilePinUrl) throws YOPLEServiceException;
     void userLogout(String suid);
+    void userWithdrawal() throws YOPLEServiceException;
     UserInfoDto signUp(UserInfoDto user) throws Exception;
+
+    /**
+     * Description :  알림 리스트 조회시간 갱신
+     * 독바의 최근 알림마커는 USER_INFO테이블의 NOTI_CHECK_DT기준으로 최신 알림건 있는지 알아옴.
+     * NOTI_CHECK_DT가 갱신되는 기준은 알림 리스트 페이지를 들어갔을때임.
+     * 알림 리스트 조회에서 호출되는 함수.
+     * Name        : notiCheckDtUpdate
+     * Author      : 조 준 희
+     * History     : [2022/05/30] - 조 준 희 - Create
+     */
+    void notiCheckDtUpdate(String suid) throws YOPLEServiceException;
+
+    /**
+     * Description :  독바 최신 알림 여부 마커 조회 (유저 디테일)
+     * 독바의 최근 알림마커 최신 알림 여부 확인.
+     * Name        : newNotiCheck
+     * Author      : 조 준 희
+     * History     : [2022/05/30] - 조 준 희 - Create
+     */
+    boolean newNotiCheck(String suid) throws YOPLEServiceException;
 
     /**
      * Description :  사용자 월드 초대하기.
@@ -72,7 +97,7 @@ public interface UserService {
      * Author      : 조 준 희
      * History     : [2022/04/17] - 조 준 희 - Create
      */
-    WorldDto inviteJoinWorld(WorldInviteAccept invited, String suid) throws YOPLEServiceException;
+    WorldDto inviteJoinWorld(WorldInviteAccept invited, String suid) throws YOPLEServiceException, ExecutionException, InterruptedException;
 
     /**
      * Description : 사용자 신고하기.

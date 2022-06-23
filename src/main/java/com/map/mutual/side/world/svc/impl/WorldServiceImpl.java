@@ -1,20 +1,27 @@
 package com.map.mutual.side.world.svc.impl;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.FirebaseMessagingException;
+import com.google.firebase.messaging.TopicManagementResponse;
 import com.map.mutual.side.auth.model.dto.UserInfoDto;
 import com.map.mutual.side.auth.repository.UserInfoRepo;
-import com.map.mutual.side.review.repository.ReviewWorldMappingRepository;
-import com.map.mutual.side.world.model.dto.WorldAuthResponseDto;
-import com.map.mutual.side.world.model.entity.WorldJoinLogEntity;
-import com.map.mutual.side.world.repository.WorldJoinLogRepo;
-import com.map.mutual.side.world.repository.WorldUserMappingRepo;
 import com.map.mutual.side.common.enumerate.ApiStatusCode;
 import com.map.mutual.side.common.exception.YOPLEServiceException;
+import com.map.mutual.side.common.fcmmsg.constant.FCMConstant;
+import com.map.mutual.side.common.fcmmsg.model.entity.FcmTopicEntity;
+import com.map.mutual.side.common.fcmmsg.repository.FcmTopicRepository;
 import com.map.mutual.side.common.utils.YOPLEUtils;
+import com.map.mutual.side.review.repository.ReviewWorldMappingRepository;
+import com.map.mutual.side.world.model.dto.WorldAuthResponseDto;
 import com.map.mutual.side.world.model.dto.WorldDetailResponseDto;
 import com.map.mutual.side.world.model.dto.WorldDto;
 import com.map.mutual.side.world.model.entity.WorldEntity;
+import com.map.mutual.side.world.model.entity.WorldJoinLogEntity;
 import com.map.mutual.side.world.model.entity.WorldUserMappingEntity;
+import com.map.mutual.side.world.repository.WorldJoinLogRepo;
 import com.map.mutual.side.world.repository.WorldRepo;
+import com.map.mutual.side.world.repository.WorldUserMappingRepo;
 import com.map.mutual.side.world.svc.WorldService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -24,7 +31,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,18 +47,20 @@ public class WorldServiceImpl implements WorldService {
     private UserInfoRepo userInfoRepo;
     private ReviewWorldMappingRepository reviewWorldMappingRepo;
     private WorldJoinLogRepo worldJoinLogRepo;
+    private FcmTopicRepository fcmTopicRepository;
 
     @Autowired
     public WorldServiceImpl(WorldRepo worldRepo, WorldUserMappingRepo worldUserMappingRepo
             , ModelMapper modelMapper, UserInfoRepo userInfoRepo
             , ReviewWorldMappingRepository reviewWorldMappingRepo
-    , WorldJoinLogRepo worldJoinLogRepo) {
+    , WorldJoinLogRepo worldJoinLogRepo, FcmTopicRepository fcmTopicRepository) {
         this.worldRepo = worldRepo;
         this.worldUserMappingRepo = worldUserMappingRepo;
         this.modelMapper = modelMapper;
         this.userInfoRepo = userInfoRepo;
         this.reviewWorldMappingRepo = reviewWorldMappingRepo;
         this.worldJoinLogRepo = worldJoinLogRepo;
+        this.fcmTopicRepository = fcmTopicRepository;
     }
 
 
@@ -61,7 +72,7 @@ public class WorldServiceImpl implements WorldService {
      */
     @Override
     @Transactional
-    public WorldDto createWolrd(WorldDto worldDto) throws YOPLEServiceException {
+    public WorldDto createWolrd(WorldDto worldDto) throws YOPLEServiceException, FirebaseMessagingException {
 
         // 1. 사용자 SUID 가져오기
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
@@ -77,6 +88,7 @@ public class WorldServiceImpl implements WorldService {
         // 월드 생성 제한 수 초과 시
         // 제한된 수를 초과
         if( worldRepo.countAllByWorldOwner(userInfoDto.getSuid()) >= 10 ){
+            logger.debug("생성 가능한 월드 수 초과.");
             throw new YOPLEServiceException(ApiStatusCode.EXCEEDED_LIMITED_COUNT);
         }
 
@@ -98,12 +110,22 @@ public class WorldServiceImpl implements WorldService {
         // 6. 월드 매핑 저장.
         worldUserMappingRepo.save(worldUserMappingEntity);
 
-        // 7. 월드 입장 처리
+        logger.debug("생성된 월드 : {} , 월드 초대 코드 : {}",createWorld.toString(), worldCode);
+
+        // 7. 월드 입장 처리, fcm topic에 추가
         WorldJoinLogEntity join = WorldJoinLogEntity.builder().worldId(createWorld.getWorldId())
                 .userSuid(userInfoDto.getSuid())
                 .build();
 
         worldJoinLogRepo.save(join);
+
+        String fcmToken = userInfoRepo.findBySuid(userInfoDto.getSuid()).getFcmToken();
+        fcmTopicRepository.save(FcmTopicEntity.builder().fcmToken(fcmToken).worldId(createWorld.getWorldId()).build());
+
+        logger.debug("FCM 토큰 Topic 연동 Start ");
+        TopicManagementResponse topicManagementResponse = FirebaseMessaging.getInstance(FirebaseApp.getInstance(FCMConstant.FCM_INSTANCE)).subscribeToTopic(Collections.singletonList(fcmToken), String.valueOf(createWorld.getWorldId()));
+        logger.debug( "FCM 토큰 Topic 연동 End - 성공 카운트 : {}, 에러 카운트 : {}", topicManagementResponse.getSuccessCount(),topicManagementResponse.getFailureCount());
+
 
         // 8. 생성된 월드 정보 DTO 생성.
         WorldDto createdWorld = WorldDto.builder().worldId(createWorld.getWorldId())
@@ -206,12 +228,8 @@ public class WorldServiceImpl implements WorldService {
             Optional<WorldEntity> world = worldRepo.findById(worldId);
 
             if(world.isPresent() == false){
-                YOPLEServiceException e = new YOPLEServiceException(ApiStatusCode.SYSTEM_ERROR);
-
-                e.getResponseJsonObject().getMeta().setMsg("입장 권한 체크하려는 월드가 존재하지 않습니다.");
-                logger.error("월드 입장 권한 체크 ERROR : 입장 권한 체크하려는 월드가 존재하지 않습니다. - " + e.getResponseJsonObject().getMeta().getErrorMsg());
-                throw e;
-
+                logger.error("입장하려는 월드가 존재하지 않습니다. 월드 ID : {} ",worldId);
+                throw new YOPLEServiceException(ApiStatusCode.SYSTEM_ERROR,"입장하려는 월드가 존재하지 않습니다.");
             }
 
             WorldEntity worldEntity = world.get();
@@ -239,7 +257,7 @@ public class WorldServiceImpl implements WorldService {
      * History     : [2022-04-06] - 조 준 희 - Create
      */
     @Override
-    public List<WorldDto> getWorldOfReivew(Long reviewId, String suid) {
+    public List<WorldDto> getWorldOfReivew(Long reviewId, String suid) throws RuntimeException {
 
         // 1. 리뷰가 등록된 월드 리스트 조회하기.
         List<WorldDto> worlds = reviewWorldMappingRepo.findAllWorldsByReviewId(reviewId, suid);
@@ -258,7 +276,10 @@ public class WorldServiceImpl implements WorldService {
     @Override
     public Boolean worldUserCodeValid(String worldUserCode) throws YOPLEServiceException {
             worldUserMappingRepo.findOneByWorldUserCode(worldUserCode)
-                    .orElseThrow(()-> new YOPLEServiceException(ApiStatusCode.WORLD_USER_CDOE_VALID_FAILED));
+                    .orElseThrow(()-> {
+                        logger.debug("존재하지 않는 월드 초대 코드 : {}", worldUserCode);
+                        return new YOPLEServiceException(ApiStatusCode.WORLD_USER_CDOE_VALID_FAILED);
+                    });
 
             return true;
 

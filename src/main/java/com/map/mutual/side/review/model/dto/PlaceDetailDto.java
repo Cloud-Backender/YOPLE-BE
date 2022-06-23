@@ -26,24 +26,29 @@ public class PlaceDetailDto {
 
     private List<PlaceDetailInReview> reviews;
     private PlaceDto place;
+    private char isExistMyReview;
 
     @Getter
     @Setter
     @NoArgsConstructor
     public static class PlaceDetailInReview {
         private Long reviewId;
+        private String userId;
         private String[] imageUrls;
         private String profileUrl;
+        private String profilePinUrl;
 
         @QueryProjection
-        public PlaceDetailInReview(Long reviewId, String imageUrls, String profileUrl, LocalDateTime createDt) {
+        public PlaceDetailInReview(Long reviewId, String imageUrls, String profileUrl, String profilePinUrl, LocalDateTime createDt, String userId) {
             this.reviewId = reviewId;
             this.profileUrl = profileUrl;
+            this.profilePinUrl = profilePinUrl;
             if (imageUrls != null) {
                 this.imageUrls = imageUrls.split(",");
             } else {
                 this.imageUrls = new String[0];
             }
+            this.userId = userId;
         }
 
         public static class PlaceDetailInReviewComparatorByImageNum implements Comparator<PlaceDetailInReview> {

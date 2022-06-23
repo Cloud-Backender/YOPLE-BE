@@ -21,6 +21,7 @@ import com.map.mutual.side.world.model.entity.WorldUserMappingEntity;
 import com.map.mutual.side.world.repository.WorldUserMappingRepo;
 import com.querydsl.jpa.JPAExpressions;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Repository;
@@ -37,6 +38,7 @@ import java.util.stream.Collectors;
  * -----------------------------------------------------------
  * 2022/04/12        kimjaejung       최초 생성
  */
+@Slf4j
 @Repository
 public class ReviewRepoDSLImpl implements ReviewRepoDSL {
     private final JPAQueryFactory jpaQueryFactory;
@@ -59,6 +61,7 @@ public class ReviewRepoDSLImpl implements ReviewRepoDSL {
 
         Optional<WorldUserMappingEntity> entity = worldUserMappingRepo.findByWorldIdAndUserSuid(worldId, userInfoDto.getSuid());
         if (!entity.isPresent()) {
+            log.debug("Review 조회 - 해당유저({})는 월드({})에 대한 권한이 없음.", userInfoDto.getSuid(), worldId);
             throw new YOPLEServiceException(ApiStatusCode.FORBIDDEN);
         }
 
@@ -92,14 +95,21 @@ public class ReviewRepoDSLImpl implements ReviewRepoDSL {
                 .where(qReviewWorldMappingEntity.reviewEntity.reviewId.eq(reviewId)
                         .and(qReviewWorldMappingEntity.worldEntity.worldId.eq(worldId))
                         .and(qWorldUserMappingEntity1.worldEntity.worldId.eq(worldId))
-                        .and(qWorldUserMappingEntity2.worldEntity.worldId.eq(worldId))
-                        .and(qReview.userEntity.suid.notIn(JPAExpressions.select(qUserBlockLog.blockSuid).from(qUserBlockLog).where(qUserBlockLog.userSuid.eq(userInfoDto.getSuid())))))
+//                        .and(qWorldUserMappingEntity2.worldEntity.worldId.eq(worldId))
+                        .and(qReview.userEntity.suid
+                                .notIn(JPAExpressions
+                                        .select(qUserBlockLog.blockSuid)
+                                        .from(qUserBlockLog)
+                                        .where(qUserBlockLog.userSuid
+                                                .eq(userInfoDto.getSuid())
+                                                .and(qUserBlockLog.isBlocking.eq("Y"))))))
                 .fetchOne();
 
         if (result == null) {
-//            throw new YOPLETransactionException(ApiStatusCode.THIS_REVIEW_IS_BLOCK_USERS_REVIEW);
+            log.debug("Review 조회 - 해당 리뷰({})는 차단한 유저의 리뷰임.", reviewId);
             throw new YOPLEServiceException(ApiStatusCode.THIS_REVIEW_IS_BLOCK_USERS_REVIEW);
         }
+
 
         //Emoji 끌어오기.
         List<ReviewDto.ReviewWithInviterDto.TempEmoji> emojis = new ArrayList<>();
@@ -145,14 +155,15 @@ public class ReviewRepoDSLImpl implements ReviewRepoDSL {
         QReviewEntity qReview = new QReviewEntity("qReview");
         QPlaceEntity qPlaceEntity = new QPlaceEntity("qPlaceEntity");
         List<ReviewDto.MyReview> result = jpaQueryFactory.select(new QReviewDto_MyReview(
-                qReview.reviewId,
-                qReview.imageUrl,
-                qPlaceEntity.name,
-                qReview.createTime))
+                        qReview.reviewId,
+                        qReview.imageUrl,
+                        qPlaceEntity.name,
+                        qReview.createTime))
                 .from(qReview)
                 .innerJoin(qPlaceEntity)
                 .on(qReview.placeEntity.placeId.eq(qPlaceEntity.placeId))
                 .where(qReview.userEntity.suid.eq(userInfoDto.getSuid()))
+                .orderBy(qReview.createTime.desc())
                 .fetch();
 
         return result;
@@ -166,13 +177,13 @@ public class ReviewRepoDSLImpl implements ReviewRepoDSL {
         List<WorldDto> worldList = reviewWorldMappingRepository.findAllByReviewEntity(ReviewEntity.builder().reviewId(reviewId).build()).stream().map(data -> WorldDto.builder().worldId(data.getWorldEntity().getId()).worldName(data.getWorldEntity().getWorldName()).build()).collect(Collectors.toList());
 
         ReviewDto.preReview result = jpaQueryFactory.select(new QReviewDto_preReview(
-                qReview.reviewId,
-                qPlaceEntity.placeId,
-                qPlaceEntity.address,
-                qPlaceEntity.roadAddress,
-                qPlaceEntity.name,
-                qReview.imageUrl,
-                qReview.content))
+                        qReview.reviewId,
+                        qPlaceEntity.placeId,
+                        qPlaceEntity.name,
+                        qPlaceEntity.address,
+                        qPlaceEntity.roadAddress,
+                        qReview.imageUrl,
+                        qReview.content))
                 .from(qReview)
                 .innerJoin(qPlaceEntity)
                 .on(qReview.placeEntity.placeId.eq(qPlaceEntity.placeId))
