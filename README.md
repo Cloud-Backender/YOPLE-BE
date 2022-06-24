@@ -1,2 +1,2 @@
-# MutualMap
-MutualMap - 사이드프로젝트
+# YOPLE
+YOPLE - 사이드프로젝트
